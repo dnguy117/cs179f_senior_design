@@ -10,6 +10,10 @@ struct sleeplock;
 struct stat;
 struct superblock;
 
+// journal.c
+void initjournal (int dev);
+void journal_write ();
+
 // bio.c
 void            binit(void);
 struct buf*     bread(uint, uint);
