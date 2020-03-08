@@ -6,7 +6,7 @@
 #define BSIZE 512  // block size
 
 // Disk layout:
-// [ boot block | super block | journal | log | inode blocks |
+// [ boot block | super block | log | inode blocks |
 //                                          free bit map | data blocks]
 //
 // mkfs computes the super block and builds an initial file system. The
@@ -16,8 +16,6 @@ struct superblock {
   uint nblocks;      // Number of data blocks
   uint ninodes;      // Number of inodes.
   uint nlog;         // Number of log blocks
-  uint njournal;     // Number of journal blocks
-  uint journalstart; // Block number of first journal block
   uint logstart;     // Block number of first log block
   uint inodestart;   // Block number of first inode block
   uint bmapstart;    // Block number of first free map block

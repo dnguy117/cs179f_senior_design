@@ -43,12 +43,15 @@ struct log {
   int outstanding; // how many FS sys calls are executing.
   int committing;  // in commit(), please wait.
   int dev;
+  uint checksum;
   struct logheader lh;
 };
 struct log log;
 
 static void recover_from_log(void);
 static void commit();
+void write_checksum();
+int check_checksum();
 
 void
 initlog(int dev)
@@ -62,6 +65,7 @@ initlog(int dev)
   log.start = sb.logstart;
   log.size = sb.nlog;
   log.dev = dev;
+  log.checksum = 1;
   recover_from_log();
 }
 
@@ -194,10 +198,16 @@ commit()
 {
   if (log.lh.n > 0) {
     write_log();     // Write modified blocks from cache to log
-    write_head();    // Write header to disk -- the real commit
-    install_trans(); // Now install writes to home locations
-    log.lh.n = 0;
-    write_head();    // Erase the transaction from the log
+    write_checksum(); //
+	if (check_checksum()) {
+	  write_head();    // Write header to disk -- the real commit
+      install_trans(); // Now install writes to home locations
+      log.lh.n = 0;
+      write_head();    // Erase the transaction from the log
+	}
+	else {
+	  panic("log checksum has a missmatch");
+	}
   }
 }
 
@@ -228,7 +238,55 @@ log_write(struct buf *b)
   log.lh.block[i] = b->blockno;
   if (i == log.lh.n)
     log.lh.n++;
+  
   b->flags |= B_DIRTY; // prevent eviction
   release(&log.lock);
 }
 
+void write_checksum() {
+  int i, j;
+  uint checksum = 1;
+  
+  for ( i = 0 ; i < log.lh.n ; i++ ) {
+    struct buf *logblocks = bread(log.dev, log.start+i+1); // log block
+    for ( j = 0; j < BSIZE ; j++ ) {
+	  checksum += (i + 1);
+	  checksum *= ( j + 1 + logblocks->data[j] );
+	}
+	brelse(logblocks);
+  }
+  log.checksum = checksum;
+  //cprintf("log %d , cal %d \n", log.checksum, checksum); 
+  cprintf("write_checksum() - log checksum calculated as: %x \n", log.checksum); 
+  
+}
+
+int check_checksum() {
+  int i, j;
+  int check = 1;
+  uint new_checksum = 1;
+  
+  for ( i = 0 ; i < log.lh.n ; i++ ) {
+    struct buf *logblocks = bread(log.dev, log.start+i+1); // log block
+    for ( j = 0; j < BSIZE ; j++ ) {
+	  new_checksum += (i + 1);
+	  new_checksum *= ( j + 1 + logblocks->data[j] );
+	}
+	brelse(logblocks);
+  }
+  
+  // PRINT BOTH CHECKSUMS FOR VERIFICATION
+  cprintf("check_checksum() - log checksum: %x \n", log.checksum);
+  cprintf("check_checksum() - new checksum: %x \n", new_checksum);
+  
+  if (log.checksum == new_checksum) {
+	cprintf("check_checksum() - checksum validated prior to commit\n");
+	check = 1;
+  }
+  else {
+	cprintf("check_checksum() - ERROR: checksum invalid prior to commit\n");
+	check = 0;
+  }
+  
+  return check;
+}
