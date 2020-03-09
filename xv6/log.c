@@ -245,16 +245,16 @@ log_write(struct buf *b)
 
 void write_checksum() {
   int i, j;
-  uint checksum = 1;
+  uint checksum = 0;
   
   for ( i = 0 ; i < log.lh.n ; i++ ) {
-    struct buf *logblocks = bread(log.dev, log.start+i+1); // log block
+    struct buf *logblocks = bread(log.dev, log.start+i); // log block
     for ( j = 0; j < BSIZE ; j++ ) {
-	  checksum += (i + 1);
-	  checksum *= ( j + 1 + logblocks->data[j] );
+	  checksum += ((j+1)*logblocks->data[j]);
 	}
 	brelse(logblocks);
   }
+  checksum %= BSIZE;
   log.checksum = checksum;
   //cprintf("log %d , cal %d \n", log.checksum, checksum); 
   cprintf("write_checksum() - log checksum calculated as: %x \n", log.checksum); 
@@ -263,18 +263,17 @@ void write_checksum() {
 
 int check_checksum() {
   int i, j;
-  int check = 1;
-  uint new_checksum = 1;
+  int check = 0;
+  uint new_checksum = 0;
   
   for ( i = 0 ; i < log.lh.n ; i++ ) {
-    struct buf *logblocks = bread(log.dev, log.start+i+1); // log block
+    struct buf *logblocks = bread(log.dev, log.start+i); // log block
     for ( j = 0; j < BSIZE ; j++ ) {
-	  new_checksum += (i + 1);
-	  new_checksum *= ( j + 1 + logblocks->data[j] );
+	  new_checksum += ((j+1)*logblocks->data[j]);
 	}
 	brelse(logblocks);
   }
-  
+  new_checksum %= BSIZE;
   // PRINT BOTH CHECKSUMS FOR VERIFICATION
   cprintf("check_checksum() - log checksum: %x \n", log.checksum);
   cprintf("check_checksum() - new checksum: %x \n", new_checksum);
