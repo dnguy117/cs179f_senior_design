@@ -198,7 +198,7 @@ commit()
 {
   if (log.lh.n > 0) {
     write_log();     // Write modified blocks from cache to log
-    write_checksum(); //
+    write_checksum(); // Calculate checksum
 	if (check_checksum()) {
 	  write_head();    // Write header to disk -- the real commit
       install_trans(); // Now install writes to home locations
@@ -243,6 +243,7 @@ log_write(struct buf *b)
   release(&log.lock);
 }
 
+// Reads through allocated log blocks to calculate the checksum
 void write_checksum() {
   int i, j;
   uint checksum = 0;
@@ -254,13 +255,14 @@ void write_checksum() {
 	}
 	brelse(logblocks);
   }
-  checksum %= BSIZE;
+  checksum %= BSIZE; //Minimize size due to issues with integer overflow
   log.checksum = checksum;
   //cprintf("log %d , cal %d \n", log.checksum, checksum); 
-  cprintf("write_checksum() - log checksum calculated as: %x \n", log.checksum); 
-  
+  cprintf("write_checksum() - log checksum calculated as: %x \n", log.checksum);  
 }
 
+// Reads through the allocated log blocks to calculate a new_checksum
+// Then compares the new one to the current one to verify log integrity
 int check_checksum() {
   int i, j;
   int check = 0;
@@ -273,7 +275,7 @@ int check_checksum() {
 	}
 	brelse(logblocks);
   }
-  new_checksum %= BSIZE;
+  new_checksum %= BSIZE; // Minimize size due to issues integer overflow
   // PRINT BOTH CHECKSUMS FOR VERIFICATION
   cprintf("check_checksum() - log checksum: %x \n", log.checksum);
   cprintf("check_checksum() - new checksum: %x \n", new_checksum);
