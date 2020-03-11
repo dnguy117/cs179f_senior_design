@@ -22,12 +22,19 @@
 //
 // The log is a physical re-do log containing disk blocks.
 // The on-disk log format:
-//   header block, containing block #s for block A, B, C, ...
-//   block A
-//   block B
-//   block C
+//   30 log blocks - 1 checksum, 1 header, 28 free blocks
+//
+//   1-checksum block, will hold the checksum in the disk
+//     for power failures and crashes
+//   2-header block, containing block #s for block A, B, C, ...
+//   3-block A
+//   4-block B
+//   5-block C
 //   ...
+//   30-block ...
 // Log appends are synchronous.
+
+
 
 // Contents of the header block, used for both the on-disk header block
 // and to keep track in memory of logged block# before commit.
@@ -65,7 +72,7 @@ initlog(int dev)
   log.start = sb.logstart;
   log.size = sb.nlog;
   log.dev = dev;
-  log.checksum = 1;
+  log.checksum = 0;
   recover_from_log();
 }
 
@@ -76,7 +83,7 @@ install_trans(void)
   int tail;
 
   for (tail = 0; tail < log.lh.n; tail++) {
-    struct buf *lbuf = bread(log.dev, log.start+tail+1); // read log block
+    struct buf *lbuf = bread(log.dev, log.start+tail+1+1); // read log block
     struct buf *dbuf = bread(log.dev, log.lh.block[tail]); // read dst
     memmove(dbuf->data, lbuf->data, BSIZE);  // copy block to dst
     bwrite(dbuf);  // write dst to disk
@@ -89,7 +96,7 @@ install_trans(void)
 static void
 read_head(void)
 {
-  struct buf *buf = bread(log.dev, log.start);
+  struct buf *buf = bread(log.dev, (log.start+1));
   struct logheader *lh = (struct logheader *) (buf->data);
   int i;
   log.lh.n = lh->n;
@@ -105,7 +112,7 @@ read_head(void)
 static void
 write_head(void)
 {
-  struct buf *buf = bread(log.dev, log.start);
+  struct buf *buf = bread(log.dev, (log.start+1));
   struct logheader *hb = (struct logheader *) (buf->data);
   int i;
   hb->n = log.lh.n;
@@ -133,7 +140,7 @@ begin_op(void)
   while(1){
     if(log.committing){
       sleep(&log, &log.lock);
-    } else if(log.lh.n + (log.outstanding+1)*MAXOPBLOCKS > LOGSIZE){
+    } else if(log.lh.n + (log.outstanding+1)*MAXOPBLOCKS > (LOGSIZE-2)){
       // this op might exhaust log space; wait for commit.
       sleep(&log, &log.lock);
     } else {
@@ -184,7 +191,7 @@ write_log(void)
   int tail;
 
   for (tail = 0; tail < log.lh.n; tail++) {
-    struct buf *to = bread(log.dev, log.start+tail+1); // log block
+    struct buf *to = bread(log.dev, log.start+tail+1+1); // log block
     struct buf *from = bread(log.dev, log.lh.block[tail]); // cache block
     memmove(to->data, from->data, BSIZE);
     bwrite(to);  // write the log
@@ -225,7 +232,7 @@ log_write(struct buf *b)
 {
   int i;
 
-  if (log.lh.n >= LOGSIZE || log.lh.n >= log.size - 1)
+  if (log.lh.n >= LOGSIZE || log.lh.n >= (log.size - 1 - 1))
     panic("too big a transaction");
   if (log.outstanding < 1)
     panic("log_write outside of trans");
@@ -247,9 +254,11 @@ log_write(struct buf *b)
 void write_checksum() {
   int i, j;
   uint checksum = 0;
+  uint test_checksum1;
+  //uint test_checksum2;
   
   for ( i = 0 ; i < log.lh.n ; i++ ) {
-    struct buf *logblocks = bread(log.dev, log.start+i); // log block
+    struct buf *logblocks = bread(log.dev, log.start+i+1); // log block
     for ( j = 0; j < BSIZE ; j++ ) {
 	  checksum += ((j+1)*logblocks->data[j]);
 	}
@@ -257,8 +266,29 @@ void write_checksum() {
   }
   checksum %= BSIZE; //Minimize size due to issues with integer overflow
   log.checksum = checksum;
+    
   //cprintf("log %d , cal %d \n", log.checksum, checksum); 
   cprintf("write_checksum() - log checksum calculated as: %x \n", log.checksum);  
+  
+  // write checksum into disk for crash and power failure protection
+  struct buf *check_block = bread(log.dev, log.start); // check block
+  
+  check_block->data[0] = (checksum); // write checksum into buffer
+  check_block->data[1] = (checksum>>8);
+  check_block->data[2] = (checksum>>16);
+  check_block->data[3] = (checksum>>24);
+  
+  bwrite(check_block); // write buffer to disk
+  brelse(check_block); // release buffer
+  
+  // TEST functionality of checksum on disk
+  struct buf *test_check = bread(log.dev, log.start);
+  test_checksum1 = (test_check->data[0]) + (test_check->data[1]<<8) + (test_check->data[2]<<16) + (test_check->data[3]<<24);
+  //test_checksum2 = test_check->data[BSIZE-1];
+  brelse(test_check);
+  
+  cprintf("disk written checksum data[0]: %x \n" , test_checksum1);
+
 }
 
 // Reads through the allocated log blocks to calculate a new_checksum
@@ -269,7 +299,7 @@ int check_checksum() {
   uint new_checksum = 0;
   
   for ( i = 0 ; i < log.lh.n ; i++ ) {
-    struct buf *logblocks = bread(log.dev, log.start+i); // log block
+    struct buf *logblocks = bread(log.dev, log.start+i+1); // log block
     for ( j = 0; j < BSIZE ; j++ ) {
 	  new_checksum += ((j+1)*logblocks->data[j]);
 	}
