@@ -126,10 +126,35 @@ write_head(void)
 static void
 recover_from_log(void)
 {
-  read_head();
-  install_trans(); // if committed, copy from log to disk
-  log.lh.n = 0;
-  write_head(); // clear the log
+  uint disk_check, checksum;
+  int i, j;
+  checksum = 0;
+  struct buf *buf = bread(log.dev, log.start); // log block
+  disk_check = (buf->data[0]) + (buf->data[1]<<8) + (buf->data[2]<<16) + (buf->data[3]<<24); // read checksum block
+  
+  // calculate checksum from log header and log free blocks
+  for ( i = 0 ; i < log.lh.n ; i++ ) {
+    struct buf *logblocks = bread(log.dev, log.start+i+1+1); // log block
+    for ( j = 0; j < BSIZE ; j++ ) {
+	  checksum += ((j+1)*logblocks->data[j]);
+	}
+	brelse(logblocks);
+  }
+  brelse(buf);
+  checksum %= BSIZE;
+  
+  
+  if (disk_check == checksum) {
+	cprintf("boot log checksum match, proceding with log commit. \n");
+    read_head();
+    install_trans(); // if committed, copy from log to disk
+    log.lh.n = 0;
+    write_head(); // clear the log
+  }
+  else {
+    cprintf("boot log checksum mismatch, will not commit log.");
+  }
+  
 }
 
 // called at the start of each FS system call.
@@ -287,7 +312,7 @@ void write_checksum() {
   //test_checksum2 = test_check->data[BSIZE-1];
   brelse(test_check);
   
-  cprintf("disk written checksum data[0]: %x \n" , test_checksum1);
+  cprintf("disk written checksum data: %x \n" , test_checksum1);
 
 }
 
